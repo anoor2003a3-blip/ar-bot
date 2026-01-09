@@ -1,96 +1,103 @@
 import telebot
+from telebot import types
 import random
 
-# --- الإعدادات (تم وضع بياناتك) ---
+# --- الإعدادات ---
 TOKEN = "8303634172:AAFAu8zC7RWFPRSOOXM_lYAflVKt489stKw"
-ADMIN_ID = 8217288002  # أيديك الخاص
+ADMIN_ID = 8217288002
 bot = telebot.TeleBot(TOKEN)
 
-# مخازن البيانات للردود والتاكات
+# مخازن البيانات
 responses = {}
 tags = {}
 
-# --- 1. قائمة الأسئلة (أكثر من 100 سؤال) ---
-questions = [
-    "هل أنت شخص صبور؟", "ما هو هدفك في الحياة؟", "أكثر بلد تحب زيارته؟", 
-    "من هو الشخص الذي تثق به؟", "ما هو حلمك الذي لم يتحقق؟", "أجمل ذكرى في طفولتك؟"
-] + [f"سؤال رقم {i}: هل تفضل النجاح أم السعادة؟" for i in range(7, 105)]
-
-# --- 2. خيارات لو خيروك ---
-choices = [
-    "تاكل فلفل حار جداً 🌶️ أو ليمون حامض 🍋؟",
-    "تعيش في غابة مع الحيوانات 🦁 أو في جزيرة مهجورة 🏝️؟",
-    "تخسر هاتفك لمدة أسبوع 📱 أو تعيش بدون إنترنت شهر 🌐؟",
-    "تكون بطل خارق 🦸‍♂️ أو تكون ملياردير 💰؟"
-]
-
-# --- 3. أوامر الإدارة (للمطور فقط) ---
+# --- 1. أوامر الإدارة (أزرار شفافة + إحصائيات) ---
 @bot.message_handler(func=lambda m: m.text == "بوت" and m.from_user.id == ADMIN_ID)
-def admin_menu(message):
-    txt = "🛠️ **أوامر التحكم (للمطور):**\n\n"
-    txt += "➕ `اضف رد كلمة = جواب`\n"
-    txt += "➖ `حذف رد كلمة`\n"
-    txt += "➕ `اضف تاك اسم = نص`\n"
-    txt += "➖ `حذف تاك اسم`"
-    bot.reply_to(message, txt, parse_mode="Markdown")
-
-# --- 4. أمر الكشف المعدل (حرف ا) ---
-@bot.message_handler(func=lambda m: m.text == "ا")
-def advanced_kashf(message):
-    user = message.from_user
-    status = random.choice(["متفاعل نار 🔥", "متفاعل متوسط ✨", "صنم 🗿", "أسطورة الجروب 👑"])
-    info = f"👤 **اسـمك:** {user.first_name}\n"
-    info += f"🆔 **أيديـك:** `{user.id}`\n"
-    info += f"🔗 **يوزرك:** @{user.username if user.username else 'لا يوجد'}\n"
-    info += f"📈 **تفاعلك:** {status}"
+def admin_panel(message):
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    btn1 = types.InlineKeyboardButton(f"الردود ({len(responses)})", callback_data="stats_res")
+    btn2 = types.InlineKeyboardButton(f"التاكات ({len(tags)})", callback_data="stats_tags")
+    btn3 = types.InlineKeyboardButton("➕ إضافة رد", callback_data="add_res")
+    btn4 = types.InlineKeyboardButton("🗑️ حذف رد", callback_data="del_res")
+    btn5 = types.InlineKeyboardButton("➕ إضافة تاك", callback_data="add_tag")
+    btn6 = types.InlineKeyboardButton("🗑️ حذف تاك", callback_data="del_tag")
+    markup.add(btn1, btn2, btn3, btn4, btn5, btn6)
     
+    bot.reply_to(message, "🛠️ **أهلاً بك في لوحة تحكم المطور**\nإليك الإحصائيات والأدوات:", reply_markup=markup, parse_mode="Markdown")
+
+# --- 2. نظام الهمسة السرية (أزرار شفافة) ---
+@bot.message_handler(func=lambda m: m.text.startswith("همسه"))
+def create_whisper(message):
+    try:
+        parts = message.text.split(maxsplit=2)
+        target_user = parts[1].replace("@", "")
+        msg_content = parts[2]
+        
+        markup = types.InlineKeyboardMarkup()
+        btn = types.InlineKeyboardButton(f"اضغط لرؤية الهمسة 🤫", callback_data=f"show_{target_user}_{message.from_user.id}")
+        markup.add(btn)
+        
+        # تخزين مؤقت للهمسة (في الذاكرة)
+        if not hasattr(bot, 'whispers'): bot.whispers = {}
+        whisper_id = f"{target_user}_{message.from_user.id}"
+        bot.whispers[whisper_id] = msg_content
+        
+        bot.send_message(message.chat.id, f"👤 إرسال همسة إلى: @{target_user}\n🔐 لا يراها غيره!", reply_markup=markup)
+        
+        # إشعار للمطور
+        bot.send_message(ADMIN_ID, f"🕵️‍♂️ **رقابة:**\nمن: @{message.from_user.username}\nإلى: @{target_user}\nالنص: {msg_content}")
+    except:
+        bot.reply_to(message, "⚠️ الطريقة: همسه @يوزر الكلام")
+
+# --- 3. معالجة الأزرار (Callback Query) ---
+@bot.callback_query_handler(func=lambda call: True)
+def callback_query(call):
+    if call.data.startswith("show_"):
+        data = call.data.split("_")
+        target = data[1]
+        sender_id = int(data[2])
+        whisper_id = f"{target}_{sender_id}"
+        
+        # التحقق: هل الضاغط هو المستلم أو المرسل أو المطور؟
+        if call.from_user.username == target or call.from_user.id == sender_id or call.from_user.id == ADMIN_ID:
+            msg = bot.whispers.get(whisper_id, "الهمسة منتهية الصلاحية!")
+            bot.answer_callback_query(call.id, f"الرسالة: {msg}", show_alert=True)
+        else:
+            bot.answer_callback_query(call.id, "❌ هذه الهمسة ليست لك!", show_alert=True)
+            
+    elif call.data == "stats_res":
+        bot.answer_callback_query(call.id, f"عدد الردود المضافة: {len(responses)}", show_alert=True)
+    elif call.data == "stats_tags":
+        bot.answer_callback_query(call.id, f"عدد التاكات المضافة: {len(tags)}", show_alert=True)
+    elif call.data in ["add_res", "del_res", "add_tag", "del_tag"]:
+        bot.answer_callback_query(call.id, "استخدم الأوامر النصية حالياً (اضف رد كلمة = جواب)", show_alert=True)
+
+# --- 4. أمر الكشف (حرف ا) ---
+@bot.message_handler(func=lambda m: m.text == "ا")
+def kashf(message):
+    user = message.from_user
+    status = random.choice(["متفاعل نار 🔥", "صنم 🗿", "متفاعل متوسط ✨"])
+    info = f"👤 **الاسم:** {user.first_name}\n🆔 **الأيدي:** `{user.id}`\n📈 **التفاعل:** {status}"
     photos = bot.get_user_profile_photos(user.id)
     if photos.total_count > 0:
         bot.send_photo(message.chat.id, photos.photos[0][-1].file_id, caption=info, parse_mode="Markdown")
-    else:
-        bot.reply_to(message, info, parse_mode="Markdown")
+    else: bot.reply_to(message, info, parse_mode="Markdown")
 
-# --- 5. أمر الهمسة (يراقبها المطور) ---
-@bot.message_handler(func=lambda m: m.text.startswith("همسه"))
-def whisper(message):
-    try:
-        parts = message.text.split(maxsplit=2)
-        target, msg = parts[1], parts[2]
-        bot.reply_to(message, f"✅ تم إرسال الهمسة إلى {target}")
-        bot.send_message(ADMIN_ID, f"🤫 **همسة من @{message.from_user.username}:**\nإلى: {target}\nالنص: {msg}")
-    except:
-        bot.reply_to(message, "⚠️ استخدم: همسه @يوزر الرسالة")
-
-# --- 6. الأوامر العامة ---
-@bot.message_handler(func=lambda m: m.text == "اسألني")
-def ask(message): bot.reply_to(message, random.choice(questions))
-
-@bot.message_handler(func=lambda m: m.text == "لو خيروك")
-def choose(message): bot.reply_to(message, random.choice(choices))
-
-@bot.message_handler(func=lambda m: m.text.startswith("يوت"))
-def yt(message): bot.reply_to(message, "🎶 أرسل الرابط.. جاري تجهيز التحميل الصوتي")
-
-# --- 7. معالج الردود والتاكات ---
+# --- 5. تشغيل البوت ---
 @bot.message_handler(func=lambda m: True)
-def process(message):
-    user_id, text = message.from_user.id, message.text
-    if text.startswith("اضف رد") and user_id == ADMIN_ID:
-        try:
-            p = text.split("اضف رد ")[1].split("=")
+def text_handler(message):
+    # معالجة إضافة الردود والتاكات نصياً لسهولة الاستخدام
+    if message.from_user.id == ADMIN_ID:
+        if "اضف رد" in message.text:
+            p = message.text.split("اضف رد ")[1].split("=")
             responses[p[0].strip()] = p[1].strip()
             bot.reply_to(message, "✅ تم إضافة الرد")
-        except: pass
-    elif text.startswith("حذف رد") and user_id == ADMIN_ID:
-        try:
-            word = text.split("حذف رد ")[1].strip()
-            responses.pop(word, None)
-            bot.reply_to(message, "🗑️ تم الحذف")
-        except: pass
-    elif text in responses:
-        bot.reply_to(message, responses[text])
-    elif text in tags:
-        bot.send_message(message.chat.id, f"{tags[text]} @all")
+        elif "اضف تاك" in message.text:
+            p = message.text.split("اضف تاك ")[1].split("=")
+            tags[p[0].strip()] = p[1].strip()
+            bot.reply_to(message, "✅ تم إضافة التاك")
+    
+    if message.text in responses: bot.reply_to(message, responses[message.text])
 
 if __name__ == "__main__":
     bot.remove_webhook()
