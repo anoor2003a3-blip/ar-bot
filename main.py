@@ -1,87 +1,90 @@
 import os
 os.system("pip install yt-dlp python-telegram-bot")
 
-import json
-import random
-import asyncio
+import json, random, asyncio
 from telegram import *
 from telegram.ext import *
 
+# إعدادات البوت
 T = "8303634172:AAFAu8zC7RWFPRSOOXM_lYAflVKt489stKw"
-D = 8217288002
+OWNER_ID = 8217288002
 
 def g():
     try:
-        f = open("an.json","r")
-        d = json.load(f)
-        f.close()
-        return d
+        return json.load(open("an.json","r"))
     except:
-        return {"r":{},"t":{},"s":{},"m":""}
+        return {"r":{}, "t":{}, "s":{}, "m":""}
 
 def s(d):
-    f = open("an.json","w")
-    json.dump(d,f)
-    f.close()
+    json.dump(d, open("an.json","w"))
 
-async def inf(u,c,i,db,w):
-    try:
-        t = await c.bot.get_chat(i)
-        n = t.first_name
-        un = f"@{t.username}" if t.username else "لا يوجد"
-        v = db["s"].get(str(i),0)
-        m = f"👤: {n}\n🆔: {i}\n🔗: {un}\n💬: {v}\n📌: {w}"
-        try:
-            p = await c.bot.get_user_profile_photos(i,limit=1)
-            if p.total_count > 0:
-                await u.message.reply_photo(p.photos[0][-1].file_id,caption=m)
-            else: await u.message.reply_text(m)
-        except: await u.message.reply_text(m)
-    except: await u.message.reply_text("❌")
-
-async def h(u,c):
+async def h(u, c):
     if not u.message or not u.message.text: return
     db = g()
     tx = u.message.text
     id = str(u.effective_user.id)
-    db["s"][id] = db["s"].get(id,0) + 1
+    
+    # حفظ الإحصائيات
+    db["s"][id] = db["s"].get(id, 0) + 1
     s(db)
 
+    # ميزة الهمسة (بالرد)
+    if tx.startswith("همسه") or tx.startswith("همسة"):
+        if u.message.reply_to_message:
+            to_user = u.message.reply_to_message.from_user
+            msg = tx.replace("همسه","").replace("همسة","").strip()
+            k = InlineKeyboardMarkup([[InlineKeyboardButton(f"الهمسة لـ {to_user.first_name}", callback_data=f"h_{to_user.id}")]])
+            db["m"] = msg
+            s(db)
+            await u.message.reply_text("✅ تم إرسال الهمسة بنجاح.", reply_markup=k)
+        return
+
+    # ميزة يوت (التحميل)
     if tx.startswith("يوت"):
         nm = tx.replace("يوت","").strip()
         if nm:
-            await u.message.reply_text(f"⏳ جاري تحميل '{nm}'...")
+            m = await u.message.reply_text(f"⏳ جاري تحميل: {nm}...")
             try:
                 import yt_dlp
-                f_n = f"s_{random.randint(1,999)}.mp3"
-                opts = {'format':'bestaudio','outtmpl':f_n,'quiet':True}
-                with yt_dlp.YoutubeDL(opts) as y:
+                fn = f"{random.randint(1,999)}.mp3"
+                with yt_dlp.YoutubeDL({'format':'bestaudio','outtmpl':fn,'quiet':True}) as y:
                     y.download([f"ytsearch1:{nm}"])
-                await u.message.reply_audio(audio=open(f_n,'rb'), title=nm)
-                os.remove(f_n)
+                await u.message.reply_audio(audio=open(fn,'rb'), title=nm)
+                os.remove(fn)
+                await m.delete()
             except:
-                await u.message.reply_text(f"❌ حاول مرة أخرى بعد دقيقة.")
-            return
+                await m.edit_text("❌ فشل التحميل، جرب لاحقاً.")
+        return
 
+    # أوامر التحكم (لك فقط)
+    if tx == "البوت" and u.effective_user.id == OWNER_ID:
+        k = InlineKeyboardMarkup([
+            [InlineKeyboardButton("+ رد", callback_data="add_r"), InlineKeyboardButton("- رد", callback_data="del_r")],
+            [InlineKeyboardButton("+ تاك", callback_data="add_t"), InlineKeyboardButton("- تاك", callback_data="del_t")]
+        ])
+        await u.message.reply_text("🛠 أهلاً بك أنور.. تحكم بالبوت من هنا:", reply_markup=k)
+        return
+
+    # الردود التفاعلية
     if tx == "لو خيروك":
-        ls = ["تاكل بصل أو تشرب خل؟", "تنام بقبر أو تعيش بغابة؟"]
-        await u.message.reply_text(random.choice(ls))
-        return
+        await u.message.reply_text(random.choice(["تاكل بصل؟", "تشرب خل؟", "تنام بغابة؟"]))
+    elif tx in ["اسألني", "اسالني"]:
+        await u.message.reply_text(random.choice(["شنو برجك؟", "شنو حلمك؟", "منو قدوتك؟"]))
+    elif tx in db["r"]:
+        await u.message.reply_text(db["r"][tx])
 
-    if tx in ["اسالني", "اسألني"]:
-        ls = ["شنو برجك؟", "شنو حلمك؟", "شنو أكثر شي تحبه؟"]
-        await u.message.reply_text(random.choice(ls))
-        return
-
-    if tx == "ا":
-        t = u.message.reply_to_message.from_user if u.message.reply_to_message else u.effective_user
-        await inf(u,c,t.id,db,"كشف")
-        return
-
-    if tx in db["t"]: await inf(u,c,db["t"][tx],db,tx); return
-    if tx in db["r"]: await u.message.reply_text(db["r"][tx])
+# معالجة الضغط على الأزرار
+async def cb(u, c):
+    q = u.callback_query
+    db = g()
+    if q.data.startswith("h_"):
+        uid = q.data.split("_")[1]
+        if str(q.from_user.id) == uid:
+            await q.answer(db.get("m", "لا توجد رسالة"), show_alert=True)
+        else:
+            await q.answer("الهمسة ليست لك! ❌", show_alert=True)
 
 app = Application.builder().token(T).build()
-app.add_handler(MessageHandler(filters.TEXT,h))
-print("🚀 STARTED")
+app.add_handler(MessageHandler(filters.TEXT, h))
+app.add_handler(CallbackQueryHandler(cb))
 app.run_polling()
